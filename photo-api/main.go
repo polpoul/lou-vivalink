@@ -276,7 +276,7 @@ func main() {
 	mux.HandleFunc("/api/gallery/list", authRequired(handleList))
 	mux.HandleFunc("/api/photos/", authRequired(handleDelete)) // DELETE /api/photos/{filename}
 	// Serving des fichiers photos avec auth
-	mux.HandleFunc("/photos/", authRequired(handleServePhoto))
+	mux.HandleFunc("/photos/", handleServePhoto)
 
 	handler := corsMiddleware(mux)
 	log.Println("photo-api listening on :8080")
