@@ -1,6 +1,6 @@
 # lou.vivalink.top — Galerie photo
 
-Application de galerie photo self-hosted avec esthétique Polaroid.
+Application de galerie photo self-hosted, avec esthétique Polaroid.
 
 ## Architecture
 
