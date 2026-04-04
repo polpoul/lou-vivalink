@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	"image/png"
-	"image/gif"
+	_ "image/gif"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/image/draw"
-	"golang.org/x/image/webp"
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -146,19 +146,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		if ext == "" {
 			ext = ".jpg"
 		}
-		// Decode image
+		// Decode image (les formats sont enregistrés via les imports _)
 		var img image.Image
 		switch ext {
-		case ".jpg", ".jpeg":
-			img, err = jpeg.Decode(file)
-		case ".png":
-			img, err = png.Decode(file)
-		case ".gif":
-			img, err = gif.Decode(file)
-		case ".webp":
-			img, err = webp.Decode(file)
+		case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+			img, _, err = image.Decode(file)
 		default:
-			// Unsupported, skip
+			// Format non supporté
 			continue
 		}
 		if err != nil {
