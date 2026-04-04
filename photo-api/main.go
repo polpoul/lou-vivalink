@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	"image/jpeg"
 	_ "image/gif"
+	"image/jpeg"
 	_ "image/png"
 	"io"
 	"log"
@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	photosDir   = "/opt/photos"
+	photosDir    = "/opt/photos"
 	maxDimension = 1920
 	maxFileSize  = 50 << 20 // 50MB
 )
