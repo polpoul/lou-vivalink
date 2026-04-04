@@ -46,15 +46,18 @@ jobs:
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-      - name: Copy frontend files to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "frontend/index.html,frontend/manage.html"
-          target: "/opt/apps-vivalink/lou/"
-          strip_components: 1
+      - name: Push frontend to apps-vivalink
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/polpoul/apps-vivalink.git /tmp/apps-vivalink
+          mkdir -p /tmp/apps-vivalink/apps/lou
+          cp frontend/index.html /tmp/apps-vivalink/apps/lou/index.html
+          cp frontend/manage.html /tmp/apps-vivalink/apps/lou/manage.html
+          cd /tmp/apps-vivalink
+          git add apps/lou/
+          git diff --staged --quiet || git commit -m "update lou frontend"
+          git push
 
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1
