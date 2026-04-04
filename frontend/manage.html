@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lou — Gérer les photos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --off-white: #f8f6f3; --warm-gray: #e8e4df; --mid-gray: #b0a99f;
+      --dark: #1a1714; --accent: #c8a882; --danger: #c0392b; --success: #27ae60;
+      --shadow-soft: 0 4px 24px rgba(0,0,0,0.07);
+      --shadow-lift: 0 8px 32px rgba(0,0,0,0.14);
+    }
+    html, body { min-height: 100%; background: var(--off-white); color: var(--dark); font-family: 'DM Sans', sans-serif; }
+
+    /* Auth overlay */
+    #auth-overlay {
+      position: fixed; inset: 0; background: var(--off-white);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; flex-direction: column; gap: 1.5rem; padding: 2rem; text-align: center;
+    }
+    #auth-overlay h1 { font-family: 'Playfair Display', serif; font-size: 2.2rem; font-weight: 400; }
+    #auth-overlay h1 em { font-style: italic; color: var(--accent); }
+    .auth-card {
+      background: white; border-radius: 14px; padding: 2rem;
+      width: 100%; max-width: 340px; box-shadow: 0 4px 32px rgba(0,0,0,0.08);
+      display: flex; flex-direction: column; gap: 1rem;
+    }
+    .auth-card p { color: var(--mid-gray); font-size: 0.88rem; line-height: 1.6; }
+    .auth-card p strong { color: var(--dark); }
+    .auth-card input[type="email"] {
+      width: 100%; padding: 0.75rem 1rem;
+      border: 1px solid var(--warm-gray); border-radius: 8px;
+      font-family: 'DM Sans', sans-serif; font-size: 0.95rem;
+      outline: none; background: var(--off-white); transition: border-color 0.2s;
+    }
+    .auth-card input[type="email"]:focus { border-color: var(--accent); background: white; }
+    .auth-card .btn-primary {
+      width: 100%; padding: 0.8rem; background: var(--dark); color: white; border: none;
+      border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem;
+      letter-spacing: 0.04em; cursor: pointer; transition: opacity 0.2s;
+    }
+    .auth-card .btn-primary:hover { opacity: 0.8; }
+    .auth-card .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    #auth-msg { color: #c0392b; font-size: 0.82rem; min-height: 1rem; }
+    #auth-sent { display: none; flex-direction: column; gap: 0.75rem; align-items: center; }
+    #auth-sent .sent-icon { font-size: 2.5rem; }
+    .btn-link { background: none; border: none; color: var(--mid-gray); font-size: 0.8rem; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-family: 'DM Sans', sans-serif; }
+    .btn-link:hover { color: var(--dark); }
+
+    /* Header */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(248,246,243,0.92); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--warm-gray);
+      padding: 1.2rem 2.5rem; display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { font-family: 'Playfair Display', serif; font-size: 1.6rem; font-weight: 400; color: var(--dark); text-decoration: none; }
+    .brand em { font-style: italic; color: var(--accent); }
+    .page-label { font-size: 0.75rem; color: var(--mid-gray); letter-spacing: 0.1em; text-transform: uppercase; margin-left: 0.75rem; }
+    .btn-back {
+      display: flex; align-items: center; gap: 0.5rem;
+      background: transparent; border: 1px solid var(--warm-gray); color: var(--dark);
+      text-decoration: none; padding: 0.5rem 1.1rem; border-radius: 6px;
+      font-size: 0.82rem; letter-spacing: 0.04em; transition: border-color 0.2s, background 0.2s;
+    }
+    .btn-back:hover { border-color: var(--dark); background: var(--warm-gray); }
+
+    /* Layout */
+    main {
+      max-width: 1100px; margin: 0 auto; padding: 2.5rem 2.5rem 5rem;
+      display: grid; grid-template-columns: 340px 1fr; gap: 2.5rem; align-items: start;
+    }
+
+    /* Upload panel */
+    .upload-panel { background: white; border-radius: 12px; box-shadow: var(--shadow-soft); padding: 2rem; position: sticky; top: 5rem; }
+    .panel-title { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 400; margin-bottom: 1.5rem; }
+
+    #drop-zone {
+      border: 2px dashed var(--warm-gray); border-radius: 10px; padding: 2.5rem 1.5rem;
+      text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone:hover, #drop-zone.dragover { border-color: var(--accent); background: rgba(200,168,130,0.05); }
+    #drop-zone .dz-icon { font-size: 2.2rem; margin-bottom: 0.75rem; opacity: 0.45; }
+    #drop-zone .dz-text { font-size: 0.88rem; color: var(--mid-gray); line-height: 1.6; }
+    #drop-zone .dz-text strong { color: var(--dark); }
+    #drop-zone .dz-formats { font-size: 0.74rem; color: var(--mid-gray); margin-top: 0.5rem; }
+    #file-input { display: none; }
+
+    #preview-queue { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; max-height: 220px; overflow-y: auto; }
+    .preview-item { display: flex; align-items: center; gap: 0.75rem; background: var(--off-white); border-radius: 7px; padding: 0.45rem 0.7rem; font-size: 0.8rem; }
+    .preview-item img { width: 34px; height: 34px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+    .preview-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-item .size { color: var(--mid-gray); white-space: nowrap; }
+    .preview-item .rm { background: none; border: none; cursor: pointer; color: var(--mid-gray); font-size: 0.95rem; padding: 0 0.15rem; }
+    .preview-item .rm:hover { color: var(--danger); }
+
+    #upload-progress { display: none; margin-top: 1rem; }
+    .progress-bar-wrap { background: var(--warm-gray); border-radius: 99px; height: 3px; overflow: hidden; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 99px; transition: width 0.3s; width: 0%; }
+    #upload-status { font-size: 0.78rem; color: var(--mid-gray); margin-top: 0.4rem; }
+
+    #btn-upload {
+      margin-top: 1.2rem; width: 100%; background: var(--dark); color: white; border: none;
+      padding: 0.85rem; border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 0.9rem;
+      letter-spacing: 0.04em; cursor: pointer; transition: opacity 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    #btn-upload:hover { opacity: 0.8; }
+    #btn-upload:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Photo list */
+    .list-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1.2rem; }
+    .list-panel-title { font-family: 'Playfair Display', serif; font-size: 1.2rem; font-weight: 400; }
+    #list-count { font-size: 0.78rem; color: var(--mid-gray); }
+
+    #photo-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 1rem; }
+    .photo-card { background: white; border-radius: 8px; overflow: hidden; box-shadow: var(--shadow-soft); transition: box-shadow 0.2s, transform 0.2s; position: relative; }
+    .photo-card:hover { box-shadow: var(--shadow-lift); transform: translateY(-2px); }
+    .photo-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+    .photo-card-info { padding: 0.5rem 0.6rem; }
+    .photo-card-name { font-size: 0.7rem; color: var(--mid-gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .photo-card-size { font-size: 0.66rem; color: var(--mid-gray); margin-top: 0.12rem; opacity: 0.7; }
+    .photo-card-delete {
+      position: absolute; top: 0.4rem; right: 0.4rem;
+      background: rgba(26,23,20,0.65); border: none; color: white;
+      border-radius: 50%; width: 1.7rem; height: 1.7rem; cursor: pointer;
+      font-size: 0.8rem; display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 0.15s, background 0.15s;
+    }
+    .photo-card:hover .photo-card-delete { opacity: 1; }
+    .photo-card-delete:hover { background: var(--danger); }
+
+    .list-empty { display: flex; flex-direction: column; align-items: center; padding: 4rem 2rem; gap: 0.75rem; text-align: center; color: var(--mid-gray); font-size: 0.88rem; }
+    .list-empty .icon { font-size: 2.5rem; opacity: 0.25; }
+
+    /* Confirm dialog */
+    #confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 400; align-items: center; justify-content: center; }
+    #confirm-overlay.open { display: flex; }
+    #confirm-box { background: white; border-radius: 12px; padding: 2rem; max-width: 320px; width: 90%; box-shadow: var(--shadow-lift); text-align: center; }
+    #confirm-box h3 { font-family: 'Playfair Display', serif; font-size: 1.1rem; margin-bottom: 0.5rem; }
+    #confirm-box p { color: var(--mid-gray); font-size: 0.86rem; margin-bottom: 1.5rem; }
+    #confirm-box .btn-row { display: flex; gap: 0.75rem; justify-content: center; }
+    #confirm-box button { padding: 0.6rem 1.3rem; border-radius: 6px; font-family: 'DM Sans', sans-serif; font-size: 0.86rem; cursor: pointer; border: 1px solid var(--warm-gray); background: transparent; transition: background 0.15s; }
+    #confirm-box .btn-danger { background: var(--danger); color: white; border-color: var(--danger); }
+    #confirm-box .btn-danger:hover { opacity: 0.85; }
+
+    /* Toast */
+    #toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%); background: var(--dark); color: white; padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.86rem; z-index: 300; opacity: 0; transition: opacity 0.25s; pointer-events: none; white-space: nowrap; }
+    #toast.show { opacity: 1; }
+    #toast.success { background: var(--success); }
+    #toast.error { background: var(--danger); }
+  </style>
+</head>
+<body>
+
+<div id="auth-overlay">
+  <h1>Lou <em>&</em> Photos</h1>
+  <div class="auth-card">
+    <div id="auth-email-step" style="display:flex; flex-direction:column; gap:1rem;">
+      <p>Entrez votre adresse email pour recevoir un <strong>lien de connexion</strong>.</p>
+      <input type="email" id="email-input" placeholder="votre@email.com" autocomplete="email"
+             onkeydown="if(event.key==='Enter') sendMagicLink()" />
+      <button class="btn-primary" id="btn-send" onclick="sendMagicLink()">Envoyer le lien</button>
+      <span id="auth-msg"></span>
+    </div>
+    <div id="auth-sent">
+      <div class="sent-icon">✉️</div>
+      <p>Lien envoyé à <strong id="sent-email"></strong>.<br><br>Cliquez sur le lien dans votre email pour accéder à la gestion.</p>
+      <button class="btn-link" onclick="resetAuthForm()">Utiliser une autre adresse</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div style="display:flex; align-items:baseline;">
+    <a class="brand" href="/">Lou <em>&</em> Photos</a>
+    <span class="page-label">Gestion</span>
+  </div>
+  <a class="btn-back" href="/">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+    Galerie
+  </a>
+</header>
+
+<main>
+  <aside class="upload-panel">
+    <h2 class="panel-title">Ajouter des photos</h2>
+    <div id="drop-zone">
+      <div class="dz-icon">📎</div>
+      <div class="dz-text"><strong>Glissez vos photos ici</strong><br>ou cliquez pour choisir</div>
+      <div class="dz-formats">JPG · PNG · GIF · WebP — max 50 Mo</div>
+    </div>
+    <input type="file" id="file-input" multiple accept="image/*" />
+    <div id="preview-queue"></div>
+    <div id="upload-progress">
+      <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+      <div id="upload-status"></div>
+    </div>
+    <button id="btn-upload" disabled onclick="uploadFiles()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Envoyer
+    </button>
+  </aside>
+
+  <section>
+    <div class="list-header">
+      <h2 class="list-panel-title">Bibliothèque</h2>
+      <span id="list-count"></span>
+    </div>
+    <div id="photo-list"></div>
+  </section>
+</main>
+
+<div id="confirm-overlay">
+  <div id="confirm-box">
+    <h3>Supprimer ?</h3>
+    <p>Cette action est irréversible.</p>
+    <div class="btn-row">
+      <button onclick="closeConfirm()">Annuler</button>
+      <button class="btn-danger" onclick="confirmDelete()">Supprimer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const AUTH   = 'https://auth.vivalink.top';
+  const API    = 'https://lou.vivalink.top/api';
+  const PHOTOS = 'https://lou.vivalink.top/photos';
+  let token = localStorage.getItem('device_token') || '';
+  let selectedFiles = [];
+  let pendingDelete = null;
+
+  // Auth — même flow que galerie
+  async function handleLoginCallback() {
+    const p = new URLSearchParams(location.search);
+    const t = p.get('token');
+    if (!t) return false;
+    history.replaceState({}, '', location.pathname);
+    try {
+      const r = await fetch(`${AUTH}/auth/login?token=${encodeURIComponent(t)}`);
+      if (r.ok) { const d = await r.json(); token = d.device_token; localStorage.setItem('device_token', token); return true; }
+    } catch(e) {}
+    return false;
+  }
+
+  async function checkAuth() {
+    if (!token) return false;
+    try {
+      const r = await fetch(`${AUTH}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (r.ok) return true;
+      token = ''; localStorage.removeItem('device_token'); return false;
+    } catch { return false; }
+  }
+
+  async function sendMagicLink() {
+    const email = document.getElementById('email-input').value.trim();
+    const msg = document.getElementById('auth-msg');
+    const btn = document.getElementById('btn-send');
+    if (!email) { msg.textContent = 'Adresse email requise.'; return; }
+    btn.disabled = true; btn.textContent = 'Envoi…';
+    try {
+      await fetch(`${AUTH}/auth/request-login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      document.getElementById('auth-email-step').style.display = 'none';
+      document.getElementById('sent-email').textContent = email;
+      document.getElementById('auth-sent').style.display = 'flex';
+    } catch(e) {
+      msg.textContent = 'Erreur réseau.';
+      btn.disabled = false; btn.textContent = 'Envoyer le lien';
+    }
+  }
+
+  function resetAuthForm() {
+    document.getElementById('auth-sent').style.display = 'none';
+    document.getElementById('auth-email-step').style.display = 'flex';
+    document.getElementById('auth-msg').textContent = '';
+    const btn = document.getElementById('btn-send');
+    btn.disabled = false; btn.textContent = 'Envoyer le lien';
+  }
+
+  // Drop zone
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); addFiles([...e.dataTransfer.files]); });
+  fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+
+  function addFiles(files) {
+    selectedFiles = [...selectedFiles, ...files.filter(f => f.type.startsWith('image/'))];
+    renderQueue();
+    document.getElementById('btn-upload').disabled = selectedFiles.length === 0;
+  }
+
+  function removeFile(i) {
+    selectedFiles.splice(i, 1); renderQueue();
+    document.getElementById('btn-upload').disabled = selectedFiles.length === 0;
+  }
+
+  function renderQueue() {
+    const q = document.getElementById('preview-queue');
+    q.innerHTML = '';
+    selectedFiles.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'preview-item';
+      const url = URL.createObjectURL(f);
+      div.innerHTML = `<img src="${url}" /><span class="name">${f.name}</span><span class="size">${(f.size/1024/1024).toFixed(1)} Mo</span><button class="rm" onclick="removeFile(${i})">✕</button>`;
+      q.appendChild(div);
+    });
+  }
+
+  async function uploadFiles() {
+    if (!selectedFiles.length) return;
+    const btn = document.getElementById('btn-upload');
+    const bar = document.getElementById('progress-bar');
+    const status = document.getElementById('upload-status');
+    const progress = document.getElementById('upload-progress');
+    btn.disabled = true;
+    progress.style.display = 'block';
+    bar.style.width = '15%';
+    status.textContent = `Envoi de ${selectedFiles.length} photo(s)…`;
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('photos', f));
+    try {
+      bar.style.width = '45%';
+      const r = await fetch(`${API}/photos/upload`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd
+      });
+      bar.style.width = '100%';
+      if (r.ok) {
+        const d = await r.json();
+        status.textContent = `✓ ${d.count} photo(s) ajoutée(s)`;
+        showToast(`${d.count} photo(s) ajoutée(s)`, 'success');
+        selectedFiles = []; renderQueue();
+        setTimeout(() => { progress.style.display = 'none'; bar.style.width = '0%'; }, 2000);
+        loadPhotos();
+      } else if (r.status === 401) {
+        token = ''; localStorage.removeItem('device_token'); location.reload();
+      } else {
+        showToast('Erreur lors de l\'upload', 'error');
+      }
+    } catch(e) { showToast('Erreur réseau', 'error'); }
+    finally { btn.disabled = selectedFiles.length === 0; }
+  }
+
+  async function loadPhotos() {
+    try {
+      const r = await fetch(`${API}/photos/list`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (r.status === 401) { token = ''; localStorage.removeItem('device_token'); location.reload(); return; }
+      const photos = await r.json() || [];
+      renderPhotoList(photos);
+    } catch(e) { console.error(e); }
+  }
+
+  function renderPhotoList(photos) {
+    const list = document.getElementById('photo-list');
+    const countEl = document.getElementById('list-count');
+    list.innerHTML = '';
+    if (!photos.length) {
+      countEl.textContent = '';
+      list.style.display = 'block';
+      list.innerHTML = '<div class="list-empty"><div class="icon">🖼️</div><p>Aucune photo encore.<br>Commencez par en uploader !</p></div>';
+      return;
+    }
+    list.style.display = 'grid';
+    countEl.textContent = `${photos.length} photo${photos.length > 1 ? 's' : ''}`;
+    photos.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'photo-card';
+      const kb = Math.round(p.size / 1024);
+      const sizeStr = kb > 1024 ? `${(kb/1024).toFixed(1)} Mo` : `${kb} Ko`;
+      const name = p.filename.replace(/^\d+_/, '');
+      card.innerHTML = `
+        <img src="${PHOTOS}/${p.filename}" loading="lazy" alt="" />
+        <div class="photo-card-info">
+          <div class="photo-card-name">${name}</div>
+          <div class="photo-card-size">${sizeStr}</div>
+        </div>
+        <button class="photo-card-delete" onclick="askDelete('${p.filename}')" title="Supprimer">✕</button>`;
+      list.appendChild(card);
+    });
+  }
+
+  function askDelete(filename) { pendingDelete = filename; document.getElementById('confirm-overlay').classList.add('open'); }
+  function closeConfirm() { pendingDelete = null; document.getElementById('confirm-overlay').classList.remove('open'); }
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    closeConfirm();
+    try {
+      const r = await fetch(`${API}/photos/${pendingDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      if (r.ok) { showToast('Photo supprimée', 'success'); loadPhotos(); }
+      else showToast('Erreur lors de la suppression', 'error');
+    } catch(e) { showToast('Erreur réseau', 'error'); }
+  }
+
+  function showToast(msg, type = '') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'show ' + type;
+    setTimeout(() => { t.className = ''; }, 3000);
+  }
+
+  (async () => {
+    const loggedIn = await handleLoginCallback();
+    if (loggedIn || await checkAuth()) {
+      document.getElementById('auth-overlay').style.display = 'none';
+      loadPhotos();
+    }
+  })();
+</script>
+</body>
+</html>
