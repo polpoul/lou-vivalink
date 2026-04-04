@@ -361,7 +361,7 @@
     } catch(e) { console.error(e); }
   }
 
-  function renderPhotoList(photos) {
+function renderPhotoList(photos) {
     const list = document.getElementById('photo-list');
     const countEl = document.getElementById('list-count');
     list.innerHTML = '';
@@ -385,7 +385,8 @@
           <div class="photo-card-name">${name}</div>
           <div class="photo-card-size">${sizeStr}</div>
         </div>
-        <button class="photo-card-delete" onclick="askDelete('${p.filename}')" title="Supprimer">✕</button>`;
+        <button class="photo-card-delete" title="Supprimer">✕</button>`;
+      card.querySelector('.photo-card-delete').addEventListener('click', () => askDelete(p.filename));
       list.appendChild(card);
     });
   }
