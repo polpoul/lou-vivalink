@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	_ "image/gif"
 	"image/jpeg"
+	_ "image/gif"
 	_ "image/png"
 	"io"
 	"log"
@@ -55,7 +55,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 				break
 			}
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		if r.Method == http.MethodOptions {
@@ -71,7 +71,6 @@ func verifyToken(r *http.Request) bool {
 	if authHeader == "" {
 		return false
 	}
-	// Appel à auth-service : GET /auth/me avec le Bearer token du client
 	req, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
 	if err != nil {
 		return false
@@ -102,7 +101,6 @@ func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// resizeImage redimensionne si nécessaire pour rester dans maxDimension
 func resizeImage(src image.Image) image.Image {
 	bounds := src.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
@@ -146,13 +144,11 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		if ext == "" {
 			ext = ".jpg"
 		}
-		// Decode image (les formats sont enregistrés via les imports _)
 		var img image.Image
 		switch ext {
 		case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 			img, _, err = image.Decode(file)
 		default:
-			// Format non supporté
 			continue
 		}
 		if err != nil {
@@ -160,10 +156,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		img = resizeImage(img)
-		// Toujours sauvegarder en JPEG pour uniformité
 		timestamp := time.Now().UnixNano()
 		baseName := strings.TrimSuffix(fh.Filename, filepath.Ext(fh.Filename))
-		// Sanitize
 		baseName = strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 				return r
@@ -224,7 +218,6 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: modTime.Format(time.RFC3339),
 		})
 	}
-	// Tri anti-chronologique
 	sort.Slice(photos, func(i, j int) bool {
 		return photos[i].CreatedAt > photos[j].CreatedAt
 	})
@@ -232,10 +225,6 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	filename := strings.TrimPrefix(r.URL.Path, "/api/photos/")
 	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
@@ -249,14 +238,68 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{"deleted": filename})
 }
 
+// PATCH /api/photos/{filename}/date — body: { "date": "2024-06-15" }
+func handlePatchDate(w http.ResponseWriter, r *http.Request) {
+	// Extraire filename depuis /api/photos/{filename}/date
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/photos/")
+	filename := strings.TrimSuffix(trimmed, "/date")
+	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+
+	var body struct {
+		Date string `json:"date"` // "2006-01-02"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	t, err := time.Parse("2006-01-02", body.Date)
+	if err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid date, use YYYY-MM-DD"})
+		return
+	}
+
+	filePath := filepath.Join(photosDir, filename)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+
+	if err := os.Chtimes(filePath, t, t); err != nil {
+		log.Printf("Chtimes error: %v", err)
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to update date"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{
+		"filename": filename,
+		"date":     t.Format(time.RFC3339),
+	})
+}
+
+// Router pour /api/photos/{filename} — dispatche DELETE et PATCH /date
+func photosRouter(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.Method == http.MethodDelete:
+		handleDelete(w, r)
+	case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/date"):
+		handlePatchDate(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
 func handleServePhoto(w http.ResponseWriter, r *http.Request) {
 	filename := strings.TrimPrefix(r.URL.Path, "/photos/")
 	if filename == "" || strings.Contains(filename, "..") {
 		http.NotFound(w, r)
 		return
 	}
-	path := filepath.Join(photosDir, filename)
-	http.ServeFile(w, r, path)
+	filePath := filepath.Join(photosDir, filename)
+	http.ServeFile(w, r, filePath)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -272,10 +315,8 @@ func main() {
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/api/photos/upload", authRequired(handleUpload))
 	mux.HandleFunc("/api/photos/list", authRequired(handleList))
-	// gallery list (auth required mais scope différent)
 	mux.HandleFunc("/api/gallery/list", authRequired(handleList))
-	mux.HandleFunc("/api/photos/", authRequired(handleDelete)) // DELETE /api/photos/{filename}
-	// Serving des fichiers photos avec auth
+	mux.HandleFunc("/api/photos/", authRequired(photosRouter))
 	mux.HandleFunc("/photos/", handleServePhoto)
 
 	handler := corsMiddleware(mux)
