@@ -395,9 +395,10 @@ function renderPhotoList(photos) {
   function closeConfirm() { pendingDelete = null; document.getElementById('confirm-overlay').classList.remove('open'); }
   async function confirmDelete() {
     if (!pendingDelete) return;
+    const filename = pendingDelete;
     closeConfirm();
     try {
-      const r = await fetch(`${API}/photos/${pendingDelete}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      const r = await fetch(`${API}/photos/${filename}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       if (r.ok) { showToast('Photo supprimée', 'success'); loadPhotos(); }
       else showToast('Erreur lors de la suppression', 'error');
     } catch(e) { showToast('Erreur réseau', 'error'); }
