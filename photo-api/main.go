@@ -47,6 +47,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		allowed := []string{
 			"https://lou.vivalink.top",
+			"https://voyage.vivalink.top",
 			"http://localhost:3000",
 		}
 		for _, o := range allowed {
@@ -83,6 +84,36 @@ func verifyToken(r *http.Request) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// getUserID appelle /auth/me et retourne les 8 premiers caractères du user_id
+func getUserID(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	req, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
+	if err != nil {
+		return "unknown"
+	}
+	req.Header.Set("Authorization", authHeader)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "unknown"
+	}
+	defer resp.Body.Close()
+	var data struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "unknown"
+	}
+	if data.UserID == "" {
+		return "unknown"
+	}
+	// Garder les 8 premiers caractères de l'UUID
+	if len(data.UserID) > 8 {
+		return data.UserID[:8]
+	}
+	return data.UserID
 }
 
 func authRequired(next http.HandlerFunc) http.HandlerFunc {
@@ -133,6 +164,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "no files provided"})
 		return
 	}
+
+	// Récupérer le user_id une seule fois pour tous les fichiers de cet upload
+	userID := getUserID(r)
+
 	var uploaded []string
 	for _, fh := range files {
 		file, err := fh.Open()
@@ -164,7 +199,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 			}
 			return '-'
 		}, baseName)
-		filename := fmt.Sprintf("%d_%s.jpg", timestamp, baseName)
+		// Nom du fichier : timestamp_userID_nomoriginal.jpg
+		filename := fmt.Sprintf("%d_%s_%s.jpg", timestamp, userID, baseName)
 		outPath := filepath.Join(photosDir, filename)
 		out, err := os.Create(outPath)
 		if err != nil {
@@ -240,7 +276,6 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 
 // PATCH /api/photos/{filename}/date — body: { "date": "2024-06-15" }
 func handlePatchDate(w http.ResponseWriter, r *http.Request) {
-	// Extraire filename depuis /api/photos/{filename}/date
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/photos/")
 	filename := strings.TrimSuffix(trimmed, "/date")
 	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
