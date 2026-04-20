@@ -33,6 +33,17 @@ type PhotoMeta struct {
 	URL       string `json:"url"`
 	Size      int64  `json:"size"`
 	CreatedAt string `json:"created_at"`
+	Uploader  string `json:"uploader"` // 8 premiers chars du user_id extraits du nom de fichier
+}
+
+// extractUploader extrait les 8 chars du user_id depuis le nom de fichier
+// Format attendu : timestamp_userid8chars_nom.jpg
+func extractUploader(filename string) string {
+	parts := strings.SplitN(filename, "_", 3)
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return "unknown"
 }
 
 func getEnv(key, fallback string) string {
@@ -248,6 +259,7 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 			URL:       "/photos/" + e.Name(),
 			Size:      size,
 			CreatedAt: modTime.Format(time.RFC3339),
+			Uploader:  extractUploader(e.Name()),
 		})
 	}
 	sort.Slice(photos, func(i, j int) bool {
