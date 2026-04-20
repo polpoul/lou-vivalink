@@ -57,7 +57,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Admin-Email")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -86,7 +86,6 @@ func verifyToken(r *http.Request) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// getUserID appelle /auth/me et retourne les 8 premiers caractères du user_id
 func getUserID(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
 	req, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
@@ -109,7 +108,6 @@ func getUserID(r *http.Request) string {
 	if data.UserID == "" {
 		return "unknown"
 	}
-	// Garder les 8 premiers caractères de l'UUID
 	if len(data.UserID) > 8 {
 		return data.UserID[:8]
 	}
@@ -165,7 +163,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Récupérer le user_id une seule fois pour tous les fichiers de cet upload
 	userID := getUserID(r)
 
 	var uploaded []string
@@ -199,7 +196,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 			}
 			return '-'
 		}, baseName)
-		// Nom du fichier : timestamp_userID_nomoriginal.jpg
 		filename := fmt.Sprintf("%d_%s_%s.jpg", timestamp, userID, baseName)
 		outPath := filepath.Join(photosDir, filename)
 		out, err := os.Create(outPath)
@@ -274,7 +270,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{"deleted": filename})
 }
 
-// PATCH /api/photos/{filename}/date — body: { "date": "2024-06-15" }
+// PATCH /api/photos/{filename}/date
 func handlePatchDate(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/photos/")
 	filename := strings.TrimSuffix(trimmed, "/date")
@@ -282,46 +278,90 @@ func handlePatchDate(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
 		return
 	}
-
 	var body struct {
-		Date string `json:"date"` // "2006-01-02"
+		Date string `json:"date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-
 	t, err := time.Parse("2006-01-02", body.Date)
 	if err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid date, use YYYY-MM-DD"})
 		return
 	}
-
 	filePath := filepath.Join(photosDir, filename)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
 		return
 	}
-
 	if err := os.Chtimes(filePath, t, t); err != nil {
 		log.Printf("Chtimes error: %v", err)
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to update date"})
 		return
 	}
-
 	jsonResponse(w, http.StatusOK, map[string]string{
 		"filename": filename,
 		"date":     t.Format(time.RFC3339),
 	})
 }
 
-// Router pour /api/photos/{filename} — dispatche DELETE et PATCH /date
+// PATCH /api/photos/{filename}/rotate — pivote l'image de 90° dans le sens horaire
+func handleRotate(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/photos/")
+	filename := strings.TrimSuffix(trimmed, "/rotate")
+	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+
+	filePath := filepath.Join(photosDir, filename)
+	f, err := os.Open(filePath)
+	if err != nil {
+		jsonResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+	img, _, err := image.Decode(f)
+	f.Close()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot decode image"})
+		return
+	}
+
+	// Rotation 90° horaire
+	bounds := img.Bounds()
+	newW := bounds.Dy()
+	newH := bounds.Dx()
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			dst.Set(newW-1-(y-bounds.Min.Y), x-bounds.Min.X, img.At(x, y))
+		}
+	}
+
+	out, err := os.Create(filePath)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot save image"})
+		return
+	}
+	defer out.Close()
+	if err := jpeg.Encode(out, dst, &jpeg.Options{Quality: 88}); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot encode image"})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]string{"rotated": filename})
+}
+
+// Router pour /api/photos/{filename}
 func photosRouter(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodDelete:
 		handleDelete(w, r)
 	case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/date"):
 		handlePatchDate(w, r)
+	case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/rotate"):
+		handleRotate(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -373,55 +413,35 @@ func saveAllowlist(al Allowlist) error {
 	return os.WriteFile(allowlistPath, data, 0644)
 }
 
-// getCallerEmail appelle /auth/me et retourne l'email de l'utilisateur connecté
-func getCallerEmail(r *http.Request) (string, error) {
-	authHeader := r.Header.Get("Authorization")
-	req, err := http.NewRequest("GET", authServiceURL+"/auth/me", nil)
-	if err != nil {
-		return "", err
+func adminRequired(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !verifyToken(r) {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		callerEmail := r.Header.Get("X-Admin-Email")
+		if strings.ToLower(callerEmail) != strings.ToLower(adminEmail) {
+			jsonResponse(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		next(w, r)
 	}
-	req.Header.Set("Authorization", authHeader)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var data struct {
-		UserID string `json:"user_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return "", err
-	}
-	// Récupérer l'email depuis un second appel ou depuis un endpoint dédié
-	// Pour simplifier : on stocke l'email dans un header X-Admin-Email vérifié
-	// En réalité on vérifie juste que c'est l'admin via son user_id
-	// On stocke l'admin user_id au démarrage via une variable d'env ADMIN_USER_ID
-	// ou on compare l'email passé dans le body avec ADMIN_EMAIL après vérification token
-	return data.UserID, nil
 }
 
-// POST /api/admin/invite
-// Body: { "email": "ami@example.com", "services": ["voyage", "lou"], "redirect_url": "https://voyage.vivalink.top" }
-// Header: Authorization: Bearer <device_token> — doit être l'admin
 func handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	// Vérifier que c'est bien l'admin — on compare l'email envoyé comme "admin_email" dans la requête
-	// avec ADMIN_EMAIL, et on vérifie le token
 	var body struct {
-		Email      string   `json:"email"`       // email à inviter
-		Services   []string `json:"services"`    // ["voyage", "lou", ...]
-		RedirectURL string  `json:"redirect_url"` // URL pour le magic link de bienvenue
+		Email       string   `json:"email"`
+		Services    []string `json:"services"`
+		RedirectURL string   `json:"redirect_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-
 	email := strings.ToLower(strings.TrimSpace(body.Email))
 	if email == "" || !strings.Contains(email, "@") {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid email"})
@@ -431,16 +451,12 @@ func handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "no services specified"})
 		return
 	}
-
-	// Charger l'allowlist
 	al, err := loadAllowlist()
 	if err != nil {
 		log.Printf("loadAllowlist error: %v", err)
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot load allowlist"})
 		return
 	}
-
-	// Fusionner les services (ne pas écraser ceux déjà existants)
 	existing := al[email]
 	for _, svc := range body.Services {
 		found := false
@@ -455,23 +471,19 @@ func handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	al[email] = existing
-
-	// Sauvegarder
 	if err := saveAllowlist(al); err != nil {
 		log.Printf("saveAllowlist error: %v", err)
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot save allowlist"})
 		return
 	}
 
-	// Envoyer le magic link de bienvenue via auth-service
+	// Envoyer le magic link sans champ "app" pour bypasser la vérification allowlist
 	redirectURL := body.RedirectURL
 	if redirectURL == "" && len(body.Services) > 0 {
 		redirectURL = "https://" + body.Services[0] + ".vivalink.top"
 	}
-
 	loginReqBody, _ := json.Marshal(map[string]interface{}{
 		"email":        email,
-		"app":          body.Services[0],
 		"redirect_url": redirectURL,
 	})
 	authReq, err := http.NewRequest("POST", authServiceURL+"/auth/request-login",
@@ -494,26 +506,6 @@ func handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// adminRequired vérifie que le token appartient à l'admin
-func adminRequired(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Vérifier le token d'abord
-		if !verifyToken(r) {
-			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			return
-		}
-		// Vérifier que c'est l'admin via header X-Admin-Check
-		// Le frontend envoie l'email admin dans X-Admin-Email, on vérifie côté serveur
-		callerEmail := r.Header.Get("X-Admin-Email")
-		if strings.ToLower(callerEmail) != strings.ToLower(adminEmail) {
-			jsonResponse(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-			return
-		}
-		next(w, r)
-	}
-}
-
-// GET /api/admin/allowlist — retourne l'allowlist complète
 func handleAdminAllowlist(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -527,7 +519,6 @@ func handleAdminAllowlist(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, al)
 }
 
-// DELETE /api/admin/member — body: { "email": "...", "service": "..." }
 func handleAdminRemoveMember(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -535,7 +526,7 @@ func handleAdminRemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Email   string `json:"email"`
-		Service string `json:"service"` // si vide, supprime tous les services
+		Service string `json:"service"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -548,10 +539,8 @@ func handleAdminRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Service == "" {
-		// Supprimer complètement
 		delete(al, email)
 	} else {
-		// Supprimer juste un service
 		svcs := al[email]
 		newSvcs := svcs[:0]
 		for _, s := range svcs {
