@@ -265,6 +265,15 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(photos, func(i, j int) bool {
 		return photos[i].CreatedAt > photos[j].CreatedAt
 	})
+	// Résoudre les pseudos depuis members.json
+	members, _ := loadMembers()
+	if len(members) > 0 {
+		for i := range photos {
+			if pseudo, ok := members[photos[i].Uploader]; ok {
+				photos[i].Uploader = pseudo
+			}
+		}
+	}
 	jsonResponse(w, http.StatusOK, photos)
 }
 
@@ -397,10 +406,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 var (
 	allowlistPath = getEnv("ALLOWLIST_PATH", "/opt/auth/allowlist.json")
+	membersPath   = getEnv("MEMBERS_PATH", "/opt/auth/members.json")
 	adminEmail    = getEnv("ADMIN_EMAIL", "deleupa@gmail.com")
 )
 
 type Allowlist map[string][]string
+type Members map[string]string // user_id_prefix → pseudo
 
 func loadAllowlist() (Allowlist, error) {
 	data, err := os.ReadFile(allowlistPath)
@@ -423,6 +434,29 @@ func saveAllowlist(al Allowlist) error {
 		return err
 	}
 	return os.WriteFile(allowlistPath, data, 0644)
+}
+
+func loadMembers() (Members, error) {
+	data, err := os.ReadFile(membersPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Members{}, nil
+		}
+		return nil, err
+	}
+	var m Members
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func saveMembers(m Members) error {
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(membersPath, data, 0644)
 }
 
 func adminRequired(next http.HandlerFunc) http.HandlerFunc {
@@ -573,6 +607,36 @@ func handleAdminRemoveMember(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{"removed": email})
 }
 
+func handleAdminGetMembers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	m, err := loadMembers()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot load members"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, m)
+}
+
+func handleAdminSaveMembers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var m Members
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if err := saveMembers(m); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot save members"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"saved": "ok"})
+}
+
 func main() {
 	if err := os.MkdirAll(photosDir, 0755); err != nil {
 		log.Fatalf("cannot create photos dir: %v", err)
@@ -590,6 +654,15 @@ func main() {
 	mux.HandleFunc("/api/admin/invite", adminRequired(handleAdminInvite))
 	mux.HandleFunc("/api/admin/allowlist", adminRequired(handleAdminAllowlist))
 	mux.HandleFunc("/api/admin/member", adminRequired(handleAdminRemoveMember))
+	mux.HandleFunc("/api/admin/members", adminRequired(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			handleAdminGetMembers(w, r)
+		} else if r.Method == http.MethodPost {
+			handleAdminSaveMembers(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
 
 	handler := corsMiddleware(mux)
 	log.Println("photo-api listening on :8080")
