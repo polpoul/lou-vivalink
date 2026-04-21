@@ -39,11 +39,22 @@ type PhotoMeta struct {
 // extractUploader extrait les 8 chars du user_id depuis le nom de fichier
 // Format attendu : timestamp_userid8chars_nom.jpg
 func extractUploader(filename string) string {
-	parts := strings.SplitN(filename, "_", 3)
-	if len(parts) >= 2 {
-		return parts[1]
-	}
-	return "unknown"
+    parts := strings.SplitN(filename, "_", 3)
+    if len(parts) < 2 {
+        return "unknown"
+    }
+    uid := parts[1]
+    // Prendre les 8 premiers chars
+    if len(uid) > 8 {
+        uid = uid[:8]
+    }
+    // Vérifier que c'est bien hexadécimal (user_id)
+    for _, c := range uid {
+        if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+            return "unknown"
+        }
+    }
+    return uid
 }
 
 func getEnv(key, fallback string) string {
