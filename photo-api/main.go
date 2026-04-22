@@ -29,32 +29,22 @@ const (
 var authServiceURL = getEnv("AUTH_SERVICE_URL", "http://auth-service:8080")
 
 type PhotoMeta struct {
-	Filename  string `json:"filename"`
-	URL       string `json:"url"`
-	Size      int64  `json:"size"`
-	CreatedAt string `json:"created_at"`
-	Uploader  string `json:"uploader"` // 8 premiers chars du user_id extraits du nom de fichier
+	Filename  string   `json:"filename"`
+	URL       string   `json:"url"`
+	Size      int64    `json:"size"`
+	CreatedAt string   `json:"created_at"`
+	Uploader  string   `json:"uploader"`
+	Tags      []string `json:"tags"`
 }
 
 // extractUploader extrait les 8 chars du user_id depuis le nom de fichier
 // Format attendu : timestamp_userid8chars_nom.jpg
 func extractUploader(filename string) string {
-    parts := strings.SplitN(filename, "_", 3)
-    if len(parts) < 2 {
-        return "unknown"
-    }
-    uid := parts[1]
-    // Prendre les 8 premiers chars
-    if len(uid) > 8 {
-        uid = uid[:8]
-    }
-    // Vérifier que c'est bien hexadécimal (user_id)
-    for _, c := range uid {
-        if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-            return "unknown"
-        }
-    }
-    return uid
+	parts := strings.SplitN(filename, "_", 3)
+	if len(parts) >= 2 {
+		return parts[1]
+	}
+	return "unknown"
 }
 
 func getEnv(key, fallback string) string {
@@ -285,6 +275,17 @@ func handleList(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Injecter les tags depuis le TagStore
+	ts, _ := loadTagStore()
+	if ts != nil {
+		for i := range photos {
+			if tags, ok := ts.Photos[photos[i].Filename]; ok {
+				photos[i].Tags = tags
+			} else {
+				photos[i].Tags = []string{}
+			}
+		}
+	}
 	jsonResponse(w, http.StatusOK, photos)
 }
 
@@ -394,6 +395,8 @@ func photosRouter(w http.ResponseWriter, r *http.Request) {
 		handlePatchDate(w, r)
 	case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/rotate"):
 		handleRotate(w, r)
+	case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/tags"):
+		handlePatchTags(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -418,11 +421,50 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 var (
 	allowlistPath = getEnv("ALLOWLIST_PATH", "/opt/auth/allowlist.json")
 	membersPath   = getEnv("MEMBERS_PATH", "/opt/auth/members.json")
+	tagsPath      = getEnv("TAGS_PATH", "")
 	adminEmail    = getEnv("ADMIN_EMAIL", "deleupa@gmail.com")
 )
 
 type Allowlist map[string][]string
-type Members map[string]string // user_id_prefix → pseudo
+type Members map[string]string
+
+// TagStore contient la liste des tags disponibles et les affectations par photo
+type TagStore struct {
+	Tags   []string            `json:"tags"`
+	Photos map[string][]string `json:"photos"`
+}
+
+func loadTagStore() (*TagStore, error) {
+	if tagsPath == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(tagsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &TagStore{Tags: []string{}, Photos: map[string][]string{}}, nil
+		}
+		return nil, err
+	}
+	var ts TagStore
+	if err := json.Unmarshal(data, &ts); err != nil {
+		return nil, err
+	}
+	if ts.Photos == nil {
+		ts.Photos = map[string][]string{}
+	}
+	return &ts, nil
+}
+
+func saveTagStore(ts *TagStore) error {
+	if tagsPath == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(ts, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(tagsPath, data, 0644)
+}
 
 func loadAllowlist() (Allowlist, error) {
 	data, err := os.ReadFile(allowlistPath)
@@ -648,6 +690,83 @@ func handleAdminSaveMembers(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{"saved": "ok"})
 }
 
+// PATCH /api/photos/{filename}/tags — body: { "tags": ["Plage", "Randonnée"] }
+func handlePatchTags(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/photos/")
+	filename := strings.TrimSuffix(trimmed, "/tags")
+	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+	var body struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	ts, err := loadTagStore()
+	if err != nil || ts == nil {
+		jsonResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "tags not configured"})
+		return
+	}
+	if body.Tags == nil || len(body.Tags) == 0 {
+		delete(ts.Photos, filename)
+	} else {
+		ts.Photos[filename] = body.Tags
+	}
+	if err := saveTagStore(ts); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot save tags"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{"filename": filename, "tags": body.Tags})
+}
+
+// GET /api/tags — retourne la liste des tags disponibles
+func handleGetTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ts, err := loadTagStore()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot load tags"})
+		return
+	}
+	if ts == nil {
+		jsonResponse(w, http.StatusOK, []string{})
+		return
+	}
+	jsonResponse(w, http.StatusOK, ts.Tags)
+}
+
+// POST /api/admin/tags — admin : met à jour la liste des tags disponibles
+func handleAdminSaveTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var tags []string
+	if err := json.NewDecoder(r.Body).Decode(&tags); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	ts, err := loadTagStore()
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot load tags"})
+		return
+	}
+	if ts == nil {
+		ts = &TagStore{Photos: map[string][]string{}}
+	}
+	ts.Tags = tags
+	if err := saveTagStore(ts); err != nil {
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "cannot save tags"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"saved": "ok"})
+}
+
 func main() {
 	if err := os.MkdirAll(photosDir, 0755); err != nil {
 		log.Fatalf("cannot create photos dir: %v", err)
@@ -674,6 +793,10 @@ func main() {
 			http.NotFound(w, r)
 		}
 	}))
+
+	// Routes tags
+	mux.HandleFunc("/api/tags", authRequired(handleGetTags))
+	mux.HandleFunc("/api/admin/tags", adminRequired(handleAdminSaveTags))
 
 	handler := corsMiddleware(mux)
 	log.Println("photo-api listening on :8080")
