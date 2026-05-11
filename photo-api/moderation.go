@@ -750,4 +750,7 @@ func registerModerationRoutes(mux *http.ServeMux) {
 
 	// Tags publics (filtre galerie)
 	mux.HandleFunc("/api/tags", handleGetTags)
+
+	// Gestion des tags disponibles (modérateurs)
+	mux.HandleFunc("/api/mod/tags", moderatorRequired(handleAdminSaveTags))
 }
