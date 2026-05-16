@@ -239,7 +239,19 @@ func sendUploaderMagicLink(email, token string) error {
 			"Bonjour,\r\n\r\n"+
 			"Cliquez sur ce lien pour accéder à vos photos et en ajouter de nouvelles :\r\n\r\n"+
 			"%s\r\n\r\n"+
-			"Ce lien est personnel et permanent — ne le partagez pas.\r\n",
+			"Ce lien est personnel et permanent — ne le partagez pas.\r\n\r\n"+
+			"─────────────────────────────────────────\r\n"+
+			"Comment ça fonctionne\r\n\r\n"+
+			"En envoyant vos photos, vous les partagez directement avec les mariés.\r\n"+
+			"C'est eux qui choisissent lesquelles apparaîtront dans la galerie.\r\n\r\n"+
+			"La galerie est accessible à toute personne qui en a le lien.\r\n"+
+			"L'ensemble des photos (y compris celles non publiées) n'est visible\r\n"+
+			"que par les mariés.\r\n\r\n"+
+			"Les mariés peuvent publier, retirer ou supprimer définitivement\r\n"+
+			"n'importe quelle photo.\r\n\r\n"+
+			"Les photos sont hébergées sur un serveur privé en Europe —\r\n"+
+			"elles ne transitent pas par des services de cloud grand public.\r\n"+
+			"─────────────────────────────────────────\r\n",
 		modSmtpFrom, email, link,
 	)
 	auth := smtp.PlainAuth("", modSmtpUser, modSmtpPass, modSmtpHost)
