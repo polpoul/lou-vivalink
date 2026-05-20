@@ -28,7 +28,7 @@ var (
 	uploaderTokensPath = getEnv("UPLOADER_TOKENS_PATH", "/opt/auth/uploader-tokens-ca.json")
 	moderationService  = getEnv("MODERATION_SERVICE", "ca")
 	uploaderQuota      = func() int {
-		n, _ := strconv.Atoi(getEnv("UPLOADER_QUOTA", "100"))
+		n, _ := strconv.Atoi(getEnv("UPLOADER_QUOTA", "250"))
 		if n <= 0 {
 			return 100
 		}
